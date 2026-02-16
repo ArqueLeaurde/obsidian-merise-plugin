@@ -1,0 +1,162 @@
+/**
+ * styles.css — Plugin Merise pour Obsidian
+ *
+ * Styles pour les diagrammes Mermaid interactifs (pan/zoom),
+ * la toolbar d'actions et les messages d'erreur/warning.
+ */
+
+/* ============================================================
+   Conteneur principal du diagramme
+   ============================================================ */
+
+.merise-diagram-container {
+    margin: 8px 0 16px 0;
+}
+
+/* ── Label du diagramme ── */
+
+.merise-diagram-label {
+    font-weight: 600;
+    font-size: 0.85em;
+    color: var(--text-accent);
+    margin-bottom: 6px;
+    user-select: none;
+}
+
+/* ============================================================
+   Toolbar (Export PNG, Copier Mermaid, Reset Zoom)
+   ============================================================ */
+
+.merise-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+}
+
+.merise-toolbar button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    font-size: 0.78em;
+    cursor: pointer;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    transition: background 0.15s ease, border-color 0.15s ease;
+    user-select: none;
+}
+
+.merise-toolbar button:hover {
+    background: var(--background-modifier-hover);
+    border-color: var(--text-accent);
+}
+
+.merise-toolbar button:active {
+    background: var(--background-modifier-active-hover);
+}
+
+/* ============================================================
+   Conteneur interactif (pan & zoom)
+   ============================================================ */
+
+.merise-graph-container {
+    width: 100%;
+    height: 500px;
+    overflow: hidden;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    position: relative;
+    cursor: grab;
+    background-color: var(--background-primary);
+    /* Empêcher la sélection de texte pendant le drag */
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.merise-graph-container:active {
+    cursor: grabbing;
+}
+
+/* Conteneur interne qui reçoit la transformation CSS */
+.merise-graph-inner {
+    transform-origin: 0 0;
+    will-change: transform;
+    display: inline-block;
+    /* Animation légère pour le reset */
+    transition: none;
+}
+
+.merise-graph-inner.merise-animate-reset {
+    transition: transform 0.3s ease;
+}
+
+/* S'assurer que le SVG Mermaid est bien dimensionné */
+.merise-graph-inner svg {
+    display: block;
+    max-width: none !important;
+    height: auto !important;
+}
+
+/* ============================================================
+   Messages (erreurs, warnings)
+   ============================================================ */
+
+.merise-messages {
+    padding: 8px 12px;
+    margin: 4px 0;
+    background: var(--background-secondary);
+    border-radius: 4px;
+    font-size: 0.85em;
+}
+
+.merise-messages.merise-error {
+    border-left: 3px solid var(--text-error);
+}
+
+.merise-messages.merise-warning {
+    border-left: 3px solid var(--text-warning, orange);
+}
+
+.merise-messages div {
+    margin: 2px 0;
+}
+
+/* ============================================================
+   Rendu d'erreur Mermaid (fallback code)
+   ============================================================ */
+
+.merise-render-error {
+    color: var(--text-error);
+    margin-bottom: 8px;
+    font-size: 0.85em;
+}
+
+.merise-fallback-code {
+    background: var(--background-secondary);
+    padding: 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 0.82em;
+    line-height: 1.5;
+}
+
+/* ============================================================
+   Zoom indicator overlay
+   ============================================================ */
+
+.merise-zoom-indicator {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    font-size: 0.72em;
+    color: var(--text-muted);
+    background: var(--background-secondary-alt);
+    padding: 2px 6px;
+    border-radius: 3px;
+    pointer-events: none;
+    opacity: 0.8;
+}

@@ -1,0 +1,9 @@
+{
+    "id": "merise-plugin",
+    "name": "Merise Modeling",
+    "version": "1.0.0",
+    "minAppVersion": "1.0.0",
+    "description": "Modélisation Merise complète (MCD, MLD, MPD) avec rendu Mermaid, conversion automatique et export SQL.",
+    "author": "Merise Plugin",
+    "isDesktopOnly": false
+}
