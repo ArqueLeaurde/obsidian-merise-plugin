@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+main.js
+
+# Test artifacts
+test_pipeline.js
+test_results.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+*.swp
+*.swo
+*~
+
+# npm
+npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
