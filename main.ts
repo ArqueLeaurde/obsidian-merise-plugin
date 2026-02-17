@@ -13,6 +13,7 @@
 import {
     Plugin,
     MarkdownPostProcessorContext,
+    MarkdownRenderer,
     Notice,
     MarkdownView,
 } from 'obsidian';
@@ -221,19 +222,28 @@ export default class MerisePlugin extends Plugin {
     }
 
     /**
-     * Tente de rendre un diagramme Mermaid en SVG via l'API globale.
+     * Rend un diagramme Mermaid en SVG via l'API native Obsidian.
+     * Utilise MarkdownRenderer.render() qui gère nativement les blocs ```mermaid.
+     * Fallback sur window.mermaid si disponible.
      */
     private async renderMermaidDiagram(container: HTMLElement, code: string): Promise<void> {
         try {
-            const mermaid = (window as any).mermaid;
-            if (mermaid) {
-                const id = 'merise-' + Math.random().toString(36).substring(2, 9);
-                const { svg } = await mermaid.render(id, code);
-                container.innerHTML = svg;
-            } else {
-                this.renderFallbackCode(container, code);
-            }
+            // Méthode principale : utiliser le renderer Markdown natif d'Obsidian
+            // qui gère les blocs mermaid en interne
+            const mermaidBlock = '```mermaid\n' + code + '\n```';
+            await MarkdownRenderer.render(this.app, mermaidBlock, container, '', this);
         } catch (err) {
+            // Fallback : essayer l'API mermaid globale directement
+            try {
+                const mermaid = (window as any).mermaid;
+                if (mermaid) {
+                    const id = 'merise-' + Math.random().toString(36).substring(2, 9);
+                    const { svg } = await mermaid.render(id, code);
+                    container.innerHTML = svg;
+                    return;
+                }
+            } catch (_) { /* ignore */ }
+
             const errorDiv = container.createDiv({ cls: 'merise-render-error' });
             errorDiv.textContent = `⚠️ Erreur de rendu Mermaid : ${err}`;
             this.renderFallbackCode(container, code);
@@ -379,8 +389,10 @@ export default class MerisePlugin extends Plugin {
 
     /**
      * Exporte le SVG contenu dans graphInner en image PNG et déclenche
-     * le téléchargement. Exporte la taille RÉELLE du SVG (pas la zone
-     * visible à l'écran).
+     * le téléchargement.
+     * 
+     * Méthode robuste : inline tous les styles CSS calculés dans le SVG,
+     * puis utilise un data URI base64 (pas de Blob URL, compatible CSP Obsidian).
      */
     private exportPng(graphInner: HTMLElement, label: string): void {
         const svgEl = graphInner.querySelector('svg');
@@ -390,18 +402,38 @@ export default class MerisePlugin extends Plugin {
         }
 
         try {
-            // Cloner le SVG pour ajouter un fond blanc et fixer les dimensions
+            // Cloner le SVG
             const clone = svgEl.cloneNode(true) as SVGSVGElement;
 
-            // Récupérer les dimensions réelles
-            const bbox = svgEl.getBBox();
+            // Récupérer les dimensions réelles via viewBox ou getBBox
+            let width: number, height: number;
+            const viewBox = svgEl.getAttribute('viewBox');
+            if (viewBox) {
+                const parts = viewBox.split(/[\s,]+/).map(Number);
+                width = Math.ceil(parts[2] || svgEl.clientWidth || 800);
+                height = Math.ceil(parts[3] || svgEl.clientHeight || 600);
+            } else {
+                try {
+                    const bbox = svgEl.getBBox();
+                    width = Math.ceil(bbox.width + bbox.x + 40);
+                    height = Math.ceil(bbox.height + bbox.y + 40);
+                } catch (_) {
+                    width = svgEl.clientWidth || 800;
+                    height = svgEl.clientHeight || 600;
+                }
+            }
+
             const padding = 20;
-            const width = Math.ceil(bbox.width + bbox.x + padding * 2);
-            const height = Math.ceil(bbox.height + bbox.y + padding * 2);
+            width += padding * 2;
+            height += padding * 2;
 
             clone.setAttribute('width', String(width));
             clone.setAttribute('height', String(height));
             clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+            clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+
+            // Inliner les styles CSS calculés dans le SVG
+            this.inlineSvgStyles(svgEl, clone);
 
             // Ajouter un fond blanc
             const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -410,11 +442,11 @@ export default class MerisePlugin extends Plugin {
             bg.setAttribute('fill', '#ffffff');
             clone.insertBefore(bg, clone.firstChild);
 
-            // Sérialiser → blob → canvas → PNG
+            // Sérialiser → data URI base64 → Image → Canvas → PNG
             const serializer = new XMLSerializer();
             const svgString = serializer.serializeToString(clone);
-            const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-            const url = URL.createObjectURL(svgBlob);
+            const base64 = btoa(unescape(encodeURIComponent(svgString)));
+            const dataUri = `data:image/svg+xml;base64,${base64}`;
 
             const img = new Image();
             img.onload = () => {
@@ -425,34 +457,68 @@ export default class MerisePlugin extends Plugin {
                 const ctx = canvas.getContext('2d');
                 if (!ctx) {
                     new Notice('Impossible de créer le canvas.');
-                    URL.revokeObjectURL(url);
                     return;
                 }
                 ctx.scale(dpr, dpr);
                 ctx.drawImage(img, 0, 0, width, height);
 
-                // Déclencher le téléchargement
-                const dataUrl = canvas.toDataURL('image/png');
-                const a = document.createElement('a');
-                a.href = dataUrl;
-                a.download = `merise-${label.toLowerCase()}-${Date.now()}.png`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-
-                URL.revokeObjectURL(url);
+                // Déclencher le téléchargement via data URL
+                this.downloadDataUrl(
+                    canvas.toDataURL('image/png'),
+                    `merise-${label.toLowerCase()}-${Date.now()}.png`
+                );
                 new Notice(`📥 ${label} exporté en PNG !`);
             };
 
             img.onerror = () => {
-                URL.revokeObjectURL(url);
                 new Notice('Erreur lors de l\'export PNG.');
             };
 
-            img.src = url;
+            img.src = dataUri;
         } catch (err) {
             new Notice(`Erreur export PNG : ${err}`);
         }
+    }
+
+    /**
+     * Inline tous les styles CSS calculés des éléments SVG source dans le clone.
+     * Nécessaire pour que le SVG soit autonome (pas de feuille de style externe).
+     */
+    private inlineSvgStyles(source: SVGSVGElement, clone: SVGSVGElement): void {
+        const sourceElements = source.querySelectorAll('*');
+        const cloneElements = clone.querySelectorAll('*');
+
+        const importantProps = [
+            'fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-linecap',
+            'stroke-linejoin', 'opacity', 'fill-opacity', 'stroke-opacity',
+            'font-family', 'font-size', 'font-weight', 'font-style',
+            'text-anchor', 'dominant-baseline', 'text-decoration',
+            'visibility', 'display', 'color', 'rx', 'ry',
+        ];
+
+        for (let i = 0; i < sourceElements.length && i < cloneElements.length; i++) {
+            const computed = window.getComputedStyle(sourceElements[i]);
+            const cloneEl = cloneElements[i] as SVGElement;
+
+            for (const prop of importantProps) {
+                const val = computed.getPropertyValue(prop);
+                if (val && val !== '' && val !== 'none' && val !== 'normal') {
+                    cloneEl.style.setProperty(prop, val);
+                }
+            }
+        }
+    }
+
+    /**
+     * Déclenche le téléchargement d'un data URL.
+     */
+    private downloadDataUrl(dataUrl: string, filename: string): void {
+        const a = document.createElement('a');
+        a.href = dataUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
     }
 
     // ================================================================

@@ -3,13 +3,14 @@
  * 
  * Convertit un McdModel en diagramme Mermaid flowchart (graph).
  * 
- * Rendu Merise fidèle :
- *   - Entités → rectangles avec attributs (PK soulignés)
- *   - Relations → losanges (diamants) avec attributs portés
- *   - Cardinalités → labels sur chaque lien
- *   - Héritage → nœud IS-A arrondi
- *   - Entités associatives → rectangles verts liés aux relations
- *   - Courbes linéaires pour éviter les chevauchements
+ * Layout optimisé par couches (style WinDesign) :
+ *   - Couche 1 (hubs) : entités très connectées (degré ≥ 5)
+ *   - Couche 2 (masters) : entités moyennement connectées (degré 3-4)
+ *   - Couche 3 (satellites) : entités peu connectées (degré 1-2)
+ *   - Liens invisibles ~~~ entre couches pour l'ancrage vertical
+ *   - Chaînes horizontales ~~~ dans chaque couche pour compacité
+ *   - Courbe linear + rankSpacing 120 pour un rendu orthogonal propre
+ *   - linkStyle 1px pour des liens fins style WinDesign
  */
 
 import { McdModel } from '../models/types';
@@ -17,14 +18,41 @@ import { McdModel } from '../models/types';
 /**
  * Génère le code Mermaid flowchart à partir d'un McdModel.
  * 
- * Utilise graph TD (Top-Down) avec :
+ * Layout par couches avec hiérarchie basée sur le degré de connectivité :
  *   - Rectangles pour les entités (avec attributs listés)
  *   - Diamants { } pour les relations (avec attributs portés)
  *   - Labels de cardinalité sur chaque lien entité↔relation
+ *   - Subgraphs invisibles pour organiser les couches
  */
 export function renderMcdToMermaid(model: McdModel): string {
+    // ── Calculer le degré de chaque entité ──
+    const degree = new Map<string, number>();
+    for (const e of model.entities) degree.set(e.name, 0);
+    for (const r of model.relations) {
+        for (const p of r.participants) {
+            degree.set(p.entityName, (degree.get(p.entityName) || 0) + 1);
+        }
+    }
+    for (const inh of model.inheritances) {
+        degree.set(inh.parentEntity, (degree.get(inh.parentEntity) || 0) + 1);
+        for (const c of inh.childEntities) {
+            degree.set(c, (degree.get(c) || 0) + 1);
+        }
+    }
+
+    // ── Classer les entités par couche ──
+    const hubs: string[] = [];     // degré ≥ 5
+    const masters: string[] = [];  // degré 3-4
+    const satellites: string[] = []; // degré 1-2
+    for (const e of model.entities) {
+        const d = degree.get(e.name) || 0;
+        if (d >= 5) hubs.push(e.name);
+        else if (d >= 3) masters.push(e.name);
+        else satellites.push(e.name);
+    }
+
     const lines: string[] = [
-        "%%{init: {'theme':'base','flowchart':{'curve':'stepAfter','nodeSpacing':60,'rankSpacing':80,'padding':15,'useMaxWidth':false},'themeVariables':{'primaryColor':'#e3f2fd','edgeLabelBackground':'#ffffff','tertiaryColor':'#fff9c4','lineColor':'#555555','textColor':'#333333'}}}%%",
+        "%%{init: {'theme':'base','flowchart':{'curve':'linear','nodeSpacing':60,'rankSpacing':120,'padding':15,'useMaxWidth':false,'ranker':'longest-path'},'themeVariables':{'primaryColor':'#e3f2fd','edgeLabelBackground':'#ffffff','tertiaryColor':'#fff9c4','lineColor':'#555555','textColor':'#333333'}}}%%",
         'graph TD',
         '',
         '    %% Styles',
@@ -32,10 +60,11 @@ export function renderMcdToMermaid(model: McdModel): string {
         '    classDef relation fill:#fff9c4,stroke:#f9a825,stroke-width:2px,color:#212121',
         '    classDef inheritance fill:#fce4ec,stroke:#c62828,stroke-width:2px,color:#212121',
         '    classDef assocEntity fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#212121',
+        '    classDef invisible fill:none,stroke:none,color:transparent,font-size:0',
         '',
     ];
 
-    // ── Entités ──
+    // ── Déclaration de toutes les entités ──
     lines.push('    %% Entités');
     for (const entity of model.entities) {
         const attrParts: string[] = [];
@@ -119,6 +148,70 @@ export function renderMcdToMermaid(model: McdModel): string {
                 lines.push(`    ${safeId(assoc.name)} -.-|associée| rel_${safeId(rel.name)}`);
             }
         }
+    }
+
+    // ── Couches d'organisation (subgraphs invisibles) ──
+    // On place les entités dans des couches pour forcer la hiérarchie verticale
+    if (hubs.length > 0 || masters.length > 0) {
+        lines.push('');
+        lines.push('    %% Organisation par couches');
+
+        if (hubs.length > 0) {
+            lines.push('    subgraph layer_hub [" "]');
+            lines.push('        direction LR');
+            for (const h of hubs) lines.push(`        ${safeId(h)}`);
+            lines.push('    end');
+            lines.push('    style layer_hub fill:none,stroke:none');
+        }
+
+        if (masters.length > 0) {
+            lines.push('    subgraph layer_master [" "]');
+            lines.push('        direction LR');
+            for (const m of masters) lines.push(`        ${safeId(m)}`);
+            lines.push('    end');
+            lines.push('    style layer_master fill:none,stroke:none');
+        }
+
+        if (satellites.length > 0) {
+            lines.push('    subgraph layer_satellite [" "]');
+            lines.push('        direction LR');
+            for (const s of satellites) lines.push(`        ${safeId(s)}`);
+            lines.push('    end');
+            lines.push('    style layer_satellite fill:none,stroke:none');
+        }
+
+        // Chaîne d'ancrage vertical entre couches via liens invisibles
+        if (hubs.length > 0 && masters.length > 0) {
+            lines.push(`    ${safeId(hubs[0])} ~~~ ${safeId(masters[0])}`);
+        }
+        if (masters.length > 0 && satellites.length > 0) {
+            lines.push(`    ${safeId(masters[0])} ~~~ ${safeId(satellites[0])}`);
+        }
+        if (hubs.length > 0 && masters.length === 0 && satellites.length > 0) {
+            lines.push(`    ${safeId(hubs[0])} ~~~ ${safeId(satellites[0])}`);
+        }
+    }
+
+    // ── Link styles fins (style WinDesign) ──
+    // Compter le nombre total de liens pour appliquer le style mince
+    let linkCount = 0;
+    for (const rel of model.relations) {
+        linkCount += rel.participants.length;
+    }
+    for (const inh of model.inheritances) {
+        linkCount += 1 + inh.childEntities.length;
+    }
+    for (const assoc of model.associativeEntities) {
+        if (model.relations.find(r => r.name === assoc.relationName)) linkCount++;
+    }
+    // Ancrage invisible aussi
+    if (hubs.length > 0 && masters.length > 0) linkCount++;
+    if (masters.length > 0 && satellites.length > 0) linkCount++;
+    if (hubs.length > 0 && masters.length === 0 && satellites.length > 0) linkCount++;
+
+    if (linkCount > 0) {
+        const indices = Array.from({ length: linkCount }, (_, i) => i).join(',');
+        lines.push(`    linkStyle ${indices} stroke-width:1px`);
     }
 
     return lines.join('\n');
