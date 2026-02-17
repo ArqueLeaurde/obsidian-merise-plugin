@@ -2,9 +2,20 @@
  * sql/sqlGenerator.ts
  * 
  * Génération de SQL DDL à partir d'un MpdModel.
- * Supporte MySQL et PostgreSQL.
- * Gère : CREATE TABLE, PK (simples + composées), FK avec actions référentielles,
- *        NOT NULL, UNIQUE, CHECK, index.
+ * Supporte MariaDB (défaut, 100% compatible MySQL 8.0+), MySQL et PostgreSQL.
+ * 
+ * MariaDB/MySQL :
+ *   - Backticks ` pour tous les identifiants (protection mots réservés)
+ *   - ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+ *   - AUTO_INCREMENT sur les PK entières non-FK
+ *   - BOOLEAN → TINYINT(1)
+ *   - CONSTRAINT nommées pour les FK (best practice)
+ *   - ON DELETE CASCADE ON UPDATE CASCADE par défaut
+ * 
+ * PostgreSQL :
+ *   - Double quotes pour les identifiants
+ *   - SERIAL pour les PK auto-incrémentées
+ *   - Types natifs (TIMESTAMP, BOOLEAN, DOUBLE PRECISION)
  */
 
 import { MpdModel, MpdTable, MpdColumn, SqlDialect } from '../models/types';
@@ -12,13 +23,14 @@ import { MpdModel, MpdTable, MpdColumn, SqlDialect } from '../models/types';
 /**
  * Génère le script SQL DDL complet à partir d'un MpdModel.
  */
-export function generateSql(model: MpdModel, dialect: SqlDialect = 'mysql'): string {
+export function generateSql(model: MpdModel, dialect: SqlDialect = 'mariadb'): string {
     const statements: string[] = [];
 
     // Header
+    const dialectLabel = dialect === 'mariadb' ? 'MariaDB' : dialect.toUpperCase();
     statements.push(`-- ============================================`);
     statements.push(`-- Script SQL généré par le plugin Merise`);
-    statements.push(`-- Dialecte : ${dialect.toUpperCase()}`);
+    statements.push(`-- Dialecte : ${dialectLabel}`);
     statements.push(`-- ============================================`);
     statements.push('');
 
@@ -31,6 +43,13 @@ export function generateSql(model: MpdModel, dialect: SqlDialect = 'mysql'): str
     }
 
     return statements.join('\n');
+}
+
+/**
+ * Vérifie si le dialecte est de la famille MySQL/MariaDB.
+ */
+function isMysqlFamily(dialect: SqlDialect): boolean {
+    return dialect === 'mariadb' || dialect === 'mysql';
 }
 
 /**
@@ -66,8 +85,8 @@ function generateCreateTable(table: MpdTable, dialect: SqlDialect): string {
             }
         }
 
-        // AUTO_INCREMENT / SERIAL est déjà dans le type pour PG
-        if (col.isPrimaryKey && dialect === 'mysql' && col.sqlType === 'INT' &&
+        // AUTO_INCREMENT pour MariaDB/MySQL sur les PK entières non-FK
+        if (col.isPrimaryKey && isMysqlFamily(dialect) && col.sqlType === 'INT' &&
             (col.name.toLowerCase().startsWith('id') || col.name.toLowerCase().endsWith('id')) &&
             !col.foreignKey) {
             def += ' AUTO_INCREMENT';
@@ -79,13 +98,24 @@ function generateCreateTable(table: MpdTable, dialect: SqlDialect): string {
             pkColumns.push(`${q}${col.name}${q}`);
         }
 
-        // FK
+        // FK avec CONSTRAINT nommée (best practice MariaDB/MySQL)
         if (col.foreignKey) {
             const fk = col.foreignKey;
-            let fkDef = `    FOREIGN KEY (${q}${fk.columnName}${q}) REFERENCES ${q}${fk.referencedTable}${q}(${q}${fk.referencedColumn}${q})`;
-            if (fk.onDelete) fkDef += ` ON DELETE ${fk.onDelete}`;
-            if (fk.onUpdate) fkDef += ` ON UPDATE ${fk.onUpdate}`;
-            fkDefs.push(fkDef);
+            const onDelete = fk.onDelete || 'CASCADE';
+            const onUpdate = fk.onUpdate || 'CASCADE';
+
+            if (isMysqlFamily(dialect)) {
+                // CONSTRAINT nommée : fk_<table>_<colonne> (unique même si plusieurs FK vers la même table)
+                const constraintName = `fk_${table.name.toLowerCase()}_${fk.columnName.toLowerCase()}`;
+                let fkDef = `    CONSTRAINT ${q}${constraintName}${q} FOREIGN KEY (${q}${fk.columnName}${q}) REFERENCES ${q}${fk.referencedTable}${q} (${q}${fk.referencedColumn}${q})`;
+                fkDef += ` ON DELETE ${onDelete} ON UPDATE ${onUpdate}`;
+                fkDefs.push(fkDef);
+            } else {
+                // PostgreSQL : FOREIGN KEY classique
+                let fkDef = `    FOREIGN KEY (${q}${fk.columnName}${q}) REFERENCES ${q}${fk.referencedTable}${q}(${q}${fk.referencedColumn}${q})`;
+                fkDef += ` ON DELETE ${onDelete} ON UPDATE ${onUpdate}`;
+                fkDefs.push(fkDef);
+            }
         }
     }
 
@@ -101,7 +131,13 @@ function generateCreateTable(table: MpdTable, dialect: SqlDialect): string {
     allParts.push(...fkDefs);
 
     lines.push(allParts.join(',\n'));
-    lines.push(');');
+
+    // Fermeture avec ENGINE et CHARSET pour MariaDB/MySQL
+    if (isMysqlFamily(dialect)) {
+        lines.push(') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;');
+    } else {
+        lines.push(');');
+    }
 
     return lines.join('\n');
 }
@@ -111,11 +147,10 @@ function generateCreateTable(table: MpdTable, dialect: SqlDialect): string {
  */
 function formatSqlType(sqlType: string, dialect: SqlDialect): string {
     if (dialect === 'postgresql') {
-        // Remplacements PostgreSQL
         if (sqlType === 'DATETIME') return 'TIMESTAMP';
         if (sqlType === 'DOUBLE') return 'DOUBLE PRECISION';
     }
-    if (dialect === 'mysql') {
+    if (isMysqlFamily(dialect)) {
         if (sqlType === 'SERIAL') return 'INT';
         if (sqlType === 'BOOLEAN') return 'TINYINT(1)';
     }

@@ -16,7 +16,7 @@ export type Cardinality = '0,1' | '1,1' | '0,n' | '1,n';
 export type InheritanceStrategy = 'table_per_class' | 'single_table' | 'table_per_subclass';
 
 /** Dialecte SQL pour la génération */
-export type SqlDialect = 'mysql' | 'postgresql';
+export type SqlDialect = 'mariadb' | 'mysql' | 'postgresql';
 
 /** Types SQL courants */
 export type SqlType =
@@ -215,6 +215,6 @@ export interface MerisePluginSettings {
 /** Valeurs par défaut des paramètres */
 export const DEFAULT_SETTINGS: MerisePluginSettings = {
     inheritanceStrategy: 'table_per_class',
-    sqlDialect: 'mysql',
+    sqlDialect: 'mariadb',
     defaultVarcharLength: 255,
 };

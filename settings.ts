@@ -48,6 +48,7 @@ export class MeriseSettingTab extends PluginSettingTab {
             .setDesc('Dialecte SQL utilisé pour la génération du MPD et l\'export SQL.')
             .addDropdown(dropdown => {
                 dropdown
+                    .addOption('mariadb', 'MariaDB (défaut)')
                     .addOption('mysql', 'MySQL')
                     .addOption('postgresql', 'PostgreSQL')
                     .setValue(this.plugin.settings.sqlDialect)

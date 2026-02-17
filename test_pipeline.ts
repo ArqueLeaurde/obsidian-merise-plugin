@@ -201,13 +201,17 @@ assert('Validation MPD: aucune erreur', mpdErrors.length === 0, mpdErrors.map(m 
 // ============================================================
 
 console.log('\n=== STEP 4: SQL Generation ===\n');
-const sql = generateSql(mpd, 'mysql');
+const sql = generateSql(mpd, 'mariadb');
 console.log(sql);
 
 assert('SQL contient CREATE TABLE CLIENT', sql.includes('CREATE TABLE'));
 assert('SQL contient PRIMARY KEY', sql.includes('PRIMARY KEY'));
 assert('SQL contient FOREIGN KEY', sql.includes('FOREIGN KEY'));
 assert('SQL contient ON DELETE CASCADE', sql.includes('ON DELETE CASCADE'));
+assert('SQL contient ENGINE=InnoDB', sql.includes('ENGINE=InnoDB'));
+assert('SQL contient utf8mb4', sql.includes('utf8mb4'));
+assert('SQL contient CONSTRAINT nomm\u00e9e', sql.includes('CONSTRAINT'));
+assert('SQL contient MariaDB dans header', sql.includes('MariaDB'));
 
 // ============================================================
 // STEP 5 : Rendu Mermaid
